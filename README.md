@@ -1,4 +1,6 @@
-# AlertLens — SOC Alert Triage and Deduplication Dashboard
+# AlertLens — SOC Alert Triage and Deduplication Dashboard  
+
+![CI](https://github.com/yusufthecoder474/alertlens/actions/workflows/ci.yml/badge.svg)
 
 **Assumptions (one line):** Seeded/demo data is synthetic and labelled, the ML model trains on synthetic UNSW-NB15-style flows when the real dataset file is absent, and the LLM summary is off by default.
 
