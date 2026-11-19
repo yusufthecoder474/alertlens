@@ -59,12 +59,29 @@ def _find_open_incident(db: Session, key: str, ts: datetime) -> Incident | None:
     return None
 
 
-def ingest_alerts(db: Session, alerts: list[dict]) -> dict:
+def ingest_alerts(db: Session, alerts: list[dict], _attempt: int = 0) -> dict:
     """Ingest normalized alert dicts; return counts + created incident ids.
 
     Each dict needs id/timestamp/source/rule_name/severity and may carry
     src_ip/dst_ip/host/raw/is_malicious.
+
+    Concurrency: if another request inserts the same alert ids between our
+    existence check and our flush/commit, the unique alert-id primary key
+    raises IntegrityError. The whole transaction is rolled back and retried;
+    on retry the already-inserted alerts are seen and skipped, so no
+    duplicate rows are created and no work is half-applied.
     """
+    try:
+        return _ingest_once(db, alerts)
+    except IntegrityError:
+        db.rollback()
+        if _attempt >= 3:
+            raise
+        return ingest_alerts(db, alerts, _attempt + 1)
+
+
+def _ingest_once(db: Session, alerts: list[dict]) -> dict:
+    """One ingest attempt inside a single transaction (see ingest_alerts)."""
     inserted = skipped = duplicates = 0
     kept_dicts: list[dict] = []
     for raw_alert in alerts:
@@ -117,23 +134,7 @@ def ingest_alerts(db: Session, alerts: list[dict]) -> dict:
             incident_ids.append(existing.id)
         else:
             incident_ids.append(_create_incident(db, group).id)
-    try:
-        db.commit()
-    except IntegrityError:
-        # Two concurrent ingests of the same batch raced: the unique alert-id
-        # primary key rejected the loser's rows. Roll back and insert only
-        # the alerts that are still missing, so no duplicate rows appear.
-        db.rollback()
-        existing = {row[0] for row in db.query(Alert.id).all()}
-        remaining = [a for a in alerts if a["id"] not in existing]
-        if remaining:
-            result = ingest_alerts(db, remaining)
-            return {"inserted": result["inserted"], "skipped": skipped + len(alerts) - len(remaining),
-                    "duplicates": result["duplicates"],
-                    "incidents_created_or_updated": result["incidents_created_or_updated"],
-                    "incident_ids": result["incident_ids"]}
-        return {"inserted": 0, "skipped": skipped + len(alerts), "duplicates": duplicates,
-                "incidents_created_or_updated": 0, "incident_ids": []}
+    db.commit()
     return {"inserted": inserted, "skipped": skipped, "duplicates": duplicates,
             "incidents_created_or_updated": len(incident_ids), "incident_ids": incident_ids}
 
