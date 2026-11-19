@@ -34,7 +34,11 @@ class Incident(Base):
     src_ip = Column(String, nullable=True)
     status = Column(String, default="new")  # new/in_triage/investigating/resolved
     priority_score = Column(Float, default=0.0)
-    ml_probability = Column(Float, default=0.0)
+    # NULL when the incident has no flow evidence (the model did not
+    # score it). NOT default 0.0: SQLAlchemy fires a column default when
+    # the value is None on INSERT, which would silently turn "no evidence"
+    # into a 0.0 probability.
+    ml_probability = Column(Float, nullable=True, default=None)
     severity = Column(String, default="low")
     mitre_tags = Column(Text, default="[]")  # JSON list of technique ids
     factors = Column(Text, default="[]")  # JSON list of plain-English factors

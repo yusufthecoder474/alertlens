@@ -29,12 +29,17 @@ def _alert_to_dict(alert: Alert) -> dict:
     }
 
 
-def suppression_decision(ml_probability: float) -> tuple[bool, str | None]:
+def suppression_decision(ml_probability: float | None) -> tuple[bool, str | None]:
     """Apply the false-negative budget: below threshold -> suppressed.
 
     Returns (suppressed, reason). The reason names the numbers so an
     analyst can see exactly why this incident left the queue.
+    "No evidence, no suppression": when ``ml_probability`` is None the
+    incident has no flow evidence, so it is never suppressed — there is
+    no ML verdict to budget against.
     """
+    if ml_probability is None:
+        return False, None
     _, threshold = load_model()
     if ml_probability >= threshold:
         return False, None

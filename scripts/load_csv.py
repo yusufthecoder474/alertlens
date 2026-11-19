@@ -13,7 +13,11 @@ import sys
 import httpx
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
-API_KEY = os.environ.get("API_KEY", "dev-api-key-change-me")
+API_KEY = os.environ.get("API_KEY")
+if not API_KEY:
+    raise SystemExit("API_KEY is required in the environment to load alerts "
+                     "(the same key the API was started with). "
+                     "Run: API_KEY=<your key> python scripts/load_csv.py <file>")
 
 
 def _parse_raw(value) -> dict:

@@ -1,8 +1,14 @@
 """Build an alert stream from the real UNSW-NB15 dataset (if present).
 
+NOTE on IPs: the UNSW-NB15 training set as distributed here has NO
+srcip/dstip columns, so src_ip/dst_ip below are deterministic placeholder
+addresses derived from the row id (10.x.y.z, hash of the id). They are
+identifiers only — never model features — and are NOT the real addresses.
+Hosts are derived from the same hash.
+
 Reads ``data/unsw-nb15.csv`` and writes ``data/unsw_alerts.csv``: one alert
 per dataset row, timestamps spread over hours, host assigned
-deterministically from a hash of the row's srcip into a small host pool,
+deterministically from a hash of the placeholder IP into a small host pool,
 ``raw`` = JSON of the row's dur/sbytes/dbytes/rate/sttl/ct_srv_src, and
 ``is_malicious`` from the row's label.
 
@@ -70,6 +76,16 @@ CATEGORY_MAP = {
 FLOW_COLS = ["dur", "sbytes", "dbytes", "rate", "sttl", "ct_srv_src"]
 
 
+def _pseudo_ip(row_id: str, which: int) -> str:
+    """Deterministic placeholder IP from a row id (see module docstring).
+
+    The distributed UNSW-NB15 training set has no srcip/dstip columns, so
+    alerts get a stable 10.x.y.z address hashed from the row id instead.
+    """
+    digest = hashlib.sha256(f"{row_id}:{which}".encode()).hexdigest()
+    return f"10.{int(digest[0:2], 16)}.{int(digest[2:4], 16)}.{int(digest[4:6], 16)}"
+
+
 def host_for(srcip: str) -> str:
     """Deterministic host from srcip hash (same IP always maps to same host)."""
     digest = hashlib.sha256(str(srcip).encode()).hexdigest()
@@ -83,8 +99,8 @@ def main(seed: int = 42) -> int:
               '("UNSW-NB15") and save the testing set as data/unsw-nb15.csv. '
               "No data was downloaded.")
         return 0
-    df = pd.read_csv(UNSW_PATH)
-    missing = [c for c in FLOW_COLS + ["label", "srcip", "dstip"] if c not in df.columns]
+    df = pd.read_csv(UNSW_PATH, encoding="utf-8-sig")  # BOM on first column
+    missing = [c for c in FLOW_COLS + ["label"] if c not in df.columns]
     if missing:
         raise ValueError(f"{UNSW_PATH} is missing required columns {missing}")
     df = df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
@@ -93,15 +109,17 @@ def main(seed: int = 42) -> int:
         cat = str(r.get("attack_cat", "Normal"))
         rule, sev = CATEGORY_MAP.get(cat, ("Suspicious Traffic Burst", "medium"))
         raw = {c: (None if pd.isna(r[c]) else float(r[c])) for c in FLOW_COLS}
+        src_ip = _pseudo_ip(str(r["id"]), 0)
+        dst_ip = _pseudo_ip(str(r["id"]), 1)
         rows.append({
             "id": f"unsw-{i:06d}",
             "timestamp": (BASE + timedelta(seconds=int(i) * 10)).isoformat(),
             "source": "unsw-nb15",
             "rule_name": rule,
             "severity": sev,
-            "src_ip": str(r["srcip"]),
-            "dst_ip": str(r["dstip"]),
-            "host": host_for(r["srcip"]),
+            "src_ip": src_ip,
+            "dst_ip": dst_ip,
+            "host": host_for(src_ip),
             "is_malicious": int(str(r["label"]).lower() in ("1", "attack", "malicious")),
             "raw": json.dumps(raw),
         })

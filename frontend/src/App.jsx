@@ -18,12 +18,12 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 960, margin: "0 auto", padding: 16 }}>
-      <header>
-        <h1>AlertLens</h1>
-        <nav style={{ display: "flex", gap: 16 }}>
-          <a href="#/">Dashboard</a>
-          <a href="#/queue">Incident Queue</a>
+    <div className="app-shell">
+      <header className="app-header">
+        <h1 className="logo">AlertLens</h1>
+        <nav className="main-nav" aria-label="Main navigation">
+          <a href="#/" aria-current={route.page === "dashboard" ? "page" : undefined}>Dashboard</a>
+          <a href="#/queue" aria-current={route.page === "queue" ? "page" : undefined}>Incident Queue</a>
         </nav>
       </header>
       {route.page === "dashboard" && <Dashboard />}

@@ -1,4 +1,4 @@
-.PHONY: install test test-backend test-frontend run seed train benchmark lint docker-up docker-down retrain
+.PHONY: install test test-backend test-frontend run seed train benchmark lint docker-up docker-down docker-smoke retrain
 
 install:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -31,7 +31,12 @@ lint:
 	.venv/bin/ruff check api scripts tests benchmark.py
 
 docker-up:
-	docker compose up --build
+	docker compose up --build -d --wait
 
 docker-down:
-	docker compose down
+	docker compose down -v
+
+# Assert the composed stack end to end (needs `make docker-up` first and
+# API_KEY set in the environment). See scripts/docker_smoke.py.
+docker-smoke:
+	python3 scripts/docker_smoke.py

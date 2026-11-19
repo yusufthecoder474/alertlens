@@ -2,7 +2,39 @@
 metrics consistency, headline 'target not met', noisy-OR dilution at API level."""
 from datetime import datetime, timedelta
 
+import numpy as np
+import pytest
+
+import api.pipeline as pipeline
+import api.scoring as scoring
 from tests.conftest import HEADERS
+
+
+class _StubModel:
+    """Deterministic stand-in model: probability = dur / 10 (feature 0).
+
+    These tests assert suppression *behaviour* (below threshold -> hidden,
+    reopen, metrics) — not the shipped model's calibration, which changes
+    when the model is retrained (synthetic vs real UNSW-NB15 data). The
+    stub makes the tests independent of whichever model file is present:
+    benign flows (dur 0.5) score 0.05, malicious flows (dur 10) score 1.0,
+    threshold 0.5. Severity plays no part: the model reads flows only.
+    Calibration itself is covered by tests/test_scoring.py and train.py.
+    """
+
+    def predict_proba(self, X):
+        p = np.clip(np.asarray(X, dtype=float)[:, 0] / 10.0, 0.0, 1.0)
+        return np.stack([1 - p, p], axis=1)
+
+
+@pytest.fixture(autouse=True)
+def _stub_model(monkeypatch):
+    stub = _StubModel()
+    monkeypatch.setattr(scoring, "load_model", lambda: (stub, 0.5))
+    monkeypatch.setattr(pipeline, "load_model", lambda: (stub, 0.5))
+    scoring.clear_model_cache()
+    yield
+    scoring.clear_model_cache()
 
 T0 = datetime(2026, 11, 19, 9, 0, 0)
 BENIGN_FLOW = {"dur": 0.5, "sbytes": 500, "dbytes": 300, "rate": 10,
@@ -53,6 +85,21 @@ def test_reopen_returns_suppressed_incident_to_the_queue(client):
 
 def test_reopen_404(client):
     assert client.post("/incidents/9999/reopen", headers=HEADERS).status_code == 404
+
+
+def test_no_flow_evidence_incident_is_never_suppressed(client):
+    """No evidence, no suppression: an alert posted with empty raw flow
+    fields forms an incident that stays in the queue with
+    ml_probability None and the evidence package saying so."""
+    r = _post(client, [_alert("n1", T0, sev="low", raw={})])
+    assert r.status_code == 200
+    shown = _incidents(client)
+    assert len(shown) == 1
+    inc = shown[0]
+    assert inc["suppressed"] is False
+    assert inc["suppression_reason"] is None
+    assert inc["ml_probability"] is None
+    assert any("No flow evidence" in f for f in inc["factors"])
 
 
 def test_patch_status_on_suppressed_incident_clears_suppression(client):

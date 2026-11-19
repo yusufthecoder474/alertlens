@@ -50,11 +50,9 @@ def load_unsw() -> tuple[np.ndarray, np.ndarray] | None:
             "expected real UNSW-NB15 columns dur, sbytes, dbytes, rate, sttl, "
             "ct_srv_src, label. Fix the file instead of training on bad data."
         )
+    # Flow columns only: UNSW-NB15 has no severity column, and severity
+    # is not a model feature (it enters only through the priority formula).
     X = df[UNSW_COLUMNS].astype(float).to_numpy()
-    # severity_num is an alert-level feature, not a flow column: it is NaN
-    # here (median-imputed by the Pipeline) so flow training never invents it.
-    sev = np.full((len(df), 1), np.nan)
-    X = np.hstack([X, sev])
     y = (df["label"].astype(str).str.lower().isin(["1", "attack", "malicious"])).astype(int).to_numpy()
     # Same missing-flow injection as the synthetic generator, so the model
     # learns how to score alerts that arrive without flow data.

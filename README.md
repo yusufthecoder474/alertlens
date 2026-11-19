@@ -113,9 +113,10 @@ Two reductions are reported separately — conflating them was an old bug:
 All numbers below are measured by `python benchmark.py` (see `RESULTS.md` for the verbatim output). Every evaluation number is labelled with its data source; nothing is presented as production performance.
 
 - **Incident-level, not alert-level.** Scoring, threshold calibration and recall are all measured on incidents: an incident is one scenario's alerts on one host (multi-host chains split per host, one incident per host, each carrying the scenario's label).
-- **Part A — demo pipeline (synthetic seeded set).** `data/sample_alerts.csv` (152 alerts) through the real ingest pipeline: 7 incidents, 64 duplicates, 95.39% after-triage reduction, recall 1.0, precision 0.5714.
-- **Part B — 5-seed scenario evaluation (synthetic scenario set).** For each seed 0–4, `generate_scenarios(300, seed)` produces 300 labelled scenarios (140 malicious) including hard cases — benign admin PowerShell storms, scheduled-backup bursts, low-severity first-stage attacks, multi-host chains — split 60/20/20 stratified by `is_malicious` (train/val/test). A flow model trains on `generate_synthetic_flows(2000, seed)` (flow-level training); each val/test incident is scored by noisy-OR pooling its alerts' ML probabilities; the threshold is calibrated on VAL incidents with `calibrate_incident_threshold` (target 0.95) and evaluated on TEST incidents. AlertLens: mean test recall **0.9935 ± 0.0144**, precision **1.0000 ± 0.0000**, after-triage reduction **79.54% ± 2.09%**; pooled test recall 155/156 = **0.9936** with a 95% Wilson interval of **[0.9646, 0.9989]**. The recall target was met on test in all 5 seeds.
-- **Data-source labels.** Part A uses the seeded demo set (synthetic); Part B uses the synthetic scenario set. UNSW-NB15-derived evaluation is NOT RUN — no dataset file was present. To run it, save the UNSW-NB15 testing set as `data/unsw-nb15.csv` (UNSW Canberra, https://research.unsw.edu.au/projects/unsw-nb15-dataset, or Kaggle "UNSW-NB15"), run `scripts/make_alerts_from_unsw.py`, then `scripts/train.py` and `benchmark.py`.
+- **Part A — demo pipeline (synthetic seeded set).** `data/sample_alerts.csv` (152 alerts) through the real ingest pipeline with the portable synthetic fallback model — trained in memory on `generate_synthetic_flows(2000, seed=42)` with its own threshold calibrated on the matching synthetic validation split (threshold 0.1539): 8 incidents (8 surfaced, 0 suppressed), 65 duplicates, headline 94.74%, recall 1.0, precision 0.5. The demo set is a pipeline check, not a performance claim. A work copy with a UNSW-NB15-trained model (`models/model.pkl` present) scores the same demo set differently — 6 surfaced, 2 suppressed, headline "target not met", recall 0.75 — because the model and threshold differ; see `RESULTS.md` for the split.
+- **Part B — 5-seed scenario evaluation (synthetic scenario set, harder generator).** For each seed 0–4, `generate_scenarios(300, seed)` produces 300 labelled scenarios (140 malicious) including hard cases — benign admin PowerShell storms, scheduled-backup bursts, low-severity first-stage attacks, multi-host chains — split 60/20/20 stratified by `is_malicious` (train/val/test). A flow model trains on `generate_synthetic_flows(2000, seed)` (flow-level training); each val/test incident is scored by noisy-OR pooling its alerts' ML probabilities; the threshold is calibrated on VAL incidents with `calibrate_incident_threshold` (target 0.95) and evaluated on TEST incidents. The generator now uses **overlapping** flow distributions (malicious `sttl` ~ N(90,45) vs benign ~ N(200,60); malicious `rate` 1–800 vs benign 0.1–400; ~15% of malicious scenarios use benign-like flows and ~10% of benign scenarios use malicious-like flows). AlertLens: mean test recall **0.9419 ± 0.0699**, precision **0.6451 ± 0.0943**, after-triage reduction **70.02% ± 5.68%**; pooled test recall 147/156 = **0.9423** with a 95% Wilson interval of **[0.894, 0.9694]**. The recall target was **not met** on test in seeds 2 (0.9032) and 3 (0.8387) — reported honestly; the generator was not tuned to pass. **Upper-bound caveat:** the generator and the model share the same flow distributions, so Part B numbers are an upper bound on what the same approach would do on truly unseen distributions.
+- **Part C — UNSW-NB15-derived evaluation (flow-level, test only).** The UNSW-NB15 file (`data/unsw-nb15.csv`, 175,341 rows, 119,341 malicious, 45 columns) is split stratified 60/20/20 with fixed seed 42 (train 105,204 / val 35,068 / test 35,069). Features are the real UNSW columns `dur, sbytes, dbytes, rate, sttl, ct_srv_src` in a saved sklearn Pipeline (imputer + scaler + GradientBoosting) — no zero-fill, no clipping. Threshold 0.6332 calibrated on val (recall 0.9503, target met), reported on **test flows only**: recall **0.9486** (95% Wilson [0.9458, 0.9514]), precision **0.9334**, reduction **30.83%**. The target was **not met** on test — 22,643 of 23,869 malicious test flows surfaced, target not met. Part C is flow-level, not incident-level, and is reported separately, never merged into the synthetic claims. Note the two UNSW thresholds are different on purpose, not a mistake: 0.6332 is calibrated inside Part C itself (its own model trained on the 60% train split, calibrated on the 20% val split), while 0.6278 in `models/threshold.json` is the saved model's threshold written by `scripts/train.py` (80/20 split) and used by Part A in the work copy — see `RESULTS.md` for the full reconciliation. **These Part C numbers were measured in the work-copy run** (where `data/unsw-nb15.csv` exists); the portable build in this zip ships no dataset file, so Part C is **NOT RUN** there — run `python benchmark.py` in a copy with the dataset file present to reproduce it. Citation: Moustafa and Slay (2015), "UNSW-NB15: a comprehensive data set for network intrusion detection systems", MilCIS 2015. The alert stream is built by `scripts/make_alerts_from_unsw.py` (175,341 alerts, 119,341 malicious); the file has no `srcip`/`dstip` columns, so `src_ip`/`dst_ip` there are deterministic placeholder 10.x.y.z addresses hashed from the row id — identifiers only, never model features.
+- **Data-source labels.** Part A uses the seeded demo set (synthetic); Part B uses the synthetic scenario set; Part C is UNSW-NB15-derived (flow-level, test only).
 
 ## Baselines
 
@@ -123,34 +124,55 @@ Same val calibration (0.95 recall target) and same test incidents as Part B abov
 
 | Method | Recall | Precision | After-triage reduction | Recall target met (all seeds) |
 |---|---|---|---|---|
-| AlertLens (noisy-OR pooled ML prob) | 0.9935 ± 0.0144 | 1.0000 ± 0.0000 | 79.54% ± 2.09% | Yes |
-| Mean pooling (mean alert ML prob) | 0.9290 ± 0.0735 | 1.0000 ± 0.0000 | 80.80% ± 3.02% | **No — failed in seeds 2, 3, 4** |
-| Severity-only (max severity weight) | 1.0000 ± 0.0000 | 0.4937 ± 0.0035 | 58.30% ± 3.93% | Yes |
+| AlertLens (noisy-OR pooled ML prob) | 0.9419 ± 0.0699 | 0.6451 ± 0.0943 | 70.02% ± 5.68% | **No — failed in seeds 2, 3** |
+| Mean pooling (mean alert ML prob) | 0.9419 ± 0.0803 | 0.7256 ± 0.1108 | 73.55% ± 3.21% | **No — failed in seeds 0, 3** |
+| Severity-only (max severity weight) | 1.0000 ± 0.0000 | 0.4937 ± 0.0035 | 59.18% ± 2.36% | Yes |
 
-AlertLens wins on recall (target met every seed) and precision. Mean pooling — the old pooling — fails the recall target because averaging lets benign alerts dilute an attack to invisibility; its slightly higher reduction (80.80% vs 79.54%) comes from suppressing attacks it should have surfaced. Severity-only meets recall but at precision 0.4937: it surfaces roughly half the benign incidents too, and reduces the queue far less.
+On this harder set neither ML pooling method meets the recall target — mean pooling ties noisy-OR on recall (0.9419 each) and beats it on precision (0.7256 vs 0.6451), failing in seeds 0 and 3 while noisy-OR fails in seeds 2 and 3 — so under overlapping flows noisy-OR has no advantage over the mean; the pooling choice is a wash on recall. The honest conclusion is that overlapping flow distributions defeat ML-only separation at the 0.95 recall budget; severity-only still meets recall (1.0000) but at precision 0.4937: it surfaces roughly half the benign incidents too, and reduces the queue far less (59.18%). The hard set defeats ML separation, not severity-only recall — severity-only's weakness is precision, not recall.
 
 ## Results
 
-Run `python benchmark.py` and paste the output here (and into `RESULTS.md`). No numbers are claimed in this table until that run is pasted.
+The table below is measured: `python benchmark.py` was run in the extracted portable build, and the full verbatim output is in `RESULTS.md`. Re-run it yourself with the same command to reproduce it.
 
 | Metric | Value |
 |---|---|
 | Alerts in (Part A, demo set) | 152 |
-| Incidents out | 7 (all surfaced, 0 suppressed) |
-| Duplicates suppressed | 64 |
-| Dedup / correlation reduction % | 95.39 |
-| After-triage reduction % (headline) | 95.39 |
-| Recall / precision (Part A) | 1.0 / 0.5714 |
-| Dedup latency | 2.138 ms/alert (varies run to run) |
-| Incident-level recall, 5 seeds (Part B, synthetic scenario set) | 0.9935 ± 0.0144 |
-| Incident-level precision, 5 seeds | 1.0000 ± 0.0000 |
-| Incident-level after-triage reduction, 5 seeds | 79.54% ± 2.09% |
-| Pooled test recall + 95% Wilson interval | 0.9936, [0.9646, 0.9989] |
+| Incidents out | 8 (8 surfaced, 0 suppressed) |
+| Duplicates suppressed | 65 |
+| Dedup / correlation reduction % | 94.74 |
+| After-triage reduction % (headline) | 94.74% (recall 1.0) |
+| Recall / precision (Part A) | 1.0 / 0.5 |
+| Dedup latency | 6.258 ms/alert (varies run to run) |
+| Incident-level recall, 5 seeds (Part B, synthetic scenario set) | 0.9419 ± 0.0699 — target NOT met (seeds 2, 3) |
+| Incident-level precision, 5 seeds | 0.6451 ± 0.0943 |
+| Incident-level after-triage reduction, 5 seeds | 70.02% ± 5.68% |
+| Pooled test recall + 95% Wilson interval | 0.9423, [0.894, 0.9694] |
+| Flow-level recall, UNSW-NB15 test flows (Part C, work-copy run only) | 0.9486, Wilson [0.9458, 0.9514] — target NOT met |
+| Flow-level precision / reduction, UNSW-NB15 test (Part C, work-copy run only) | 0.9334 / 30.83% |
+
+## Screenshots
+
+Captured by `npm run screenshots` (see `docs/SCREENSHOTS.md` for the full set with explanations). The seeded run shows 152 alerts collapsed into 8 incidents (8 surfaced, 0 suppressed), headline 94.74%, recall 1.0 — the portable synthetic fallback model.
+
+![Dashboard — desktop](docs/screenshots/dashboard-desktop.png)
+*Dashboard: KPI hero with the headline reduction, plus the raw-alerts-to-incidents chart.*
+
+![Incident queue — desktop](docs/screenshots/queue-desktop.png)
+*Incident queue: incidents sorted by priority, with host, priority bar and severity/status badges.*
+
+![Incident detail](docs/screenshots/incident-detail.png)
+*Incident detail: evidence package (Who/What/When/Where/Why/Next action), MITRE chips and alert timeline.*
+
+![Dashboard — mobile](docs/screenshots/dashboard-mobile.png)
+*Dashboard on a 390px phone: KPI cards stack, no horizontal scroll.*
+
+![Incident queue — mobile](docs/screenshots/queue-mobile.png)
+*Queue on a 390px phone: the table becomes stacked cards with labelled fields.*
 
 ## Limitations
 
-- The seeded dataset and the fallback training data are **synthetic**; the model is highly separable on them, so the calibrated thresholds sit near the edge (0.998+ on scenario validation) and seeded precision is modest (0.5714 on the demo set). Real UNSW-NB15 data (`data/unsw-nb15.csv`, loaded by `scripts/train.py` when present; alerts built by `scripts/make_alerts_from_unsw.py`) would give a meaningful calibration.
-- Flow fields (`dur`, `sbytes`, `dbytes`, `rate`, `sttl`, `ct_srv_src`) come from the alert's `raw` payload when the SIEM provides them. A missing flow field is `NaN`, median-imputed inside the saved sklearn Pipeline — never zero-filled, never clipped. Alerts that arrive with no flow data at all are judged on their severity alone; the model is trained with 25% of rows missing all flow columns (label kept) so that imputed point is in-distribution. No IP-derived features are used anywhere: source/destination IPs are identifiers, never model inputs.
+- The seeded dataset and the scenario training data are **synthetic**. The portable build in this zip ships **no trained model** (`models/model.pkl` is excluded): at first load the API trains a synthetic model in memory and calibrates its own threshold on a deterministic synthetic train/validation split (seed 42) — it never reuses the threshold of any other model. With the real UNSW-NB15 file present (`data/unsw-nb15.csv`, loaded by `scripts/train.py`; alerts built by `scripts/make_alerts_from_unsw.py`), `python scripts/train.py` trains a model on real flows instead; that is the optional work-copy evaluation, reported separately. The Part B scenario generator and the model share distributions, so Part B is an upper bound, and the 0.95 recall target is **not met** on the harder synthetic set (seeds 2 and 3) or on the UNSW-NB15 test flows (0.9486 — target not met, measured in the work-copy run). Demo-set precision is modest (0.5 on the demo set).
+- Flow fields (`dur`, `sbytes`, `dbytes`, `rate`, `sttl`, `ct_srv_src`) come from the alert's `raw` payload when the SIEM provides them. A missing flow field is `NaN`, median-imputed inside the saved sklearn Pipeline — never zero-filled, never clipped. Alerts that arrive with no flow data at all are never scored by the model (ml_probability is None) and are never suppressed — "no evidence, no suppression" — and the evidence package says "No flow evidence was available for these alerts, so the ML model did not score them."; the model is trained with 25% of rows having a random proper subset of flow columns blanked (label kept) so that partial missingness is in-distribution. No IP-derived features are used anywhere: source/destination IPs are identifiers, never model inputs.
 - The MITRE map covers 12 rules only; unmapped rules get no technique tag.
 - Correlation is by host/src_ip within a 1-hour window — a slow, multi-day attack chain spanning hosts will split, and a multi-host chain splits into one incident per host (each carrying the chain's label in evaluation).
 - No authentication beyond the API key; this is a single-team demo, not a multi-tenant product.
@@ -162,14 +184,14 @@ Run `python benchmark.py` and paste the output here (and into `RESULTS.md`). No 
 - **Injection (A03):** all database access goes through SQLAlchemy ORM / parameterized queries; no string-built SQL anywhere.
 - **Security Misconfiguration (A05):** secrets live only in `.env` (never committed; `.env.example` is a template), debug/reload off in Docker, CORS restricted to the local dev UI origin.
 - **Vulnerable Components (A06):** pinned dependencies in `requirements.txt` / `package.json`; CI runs lint + tests on every push.
-- **Identification/Auth Failures (A07):** single shared API key is a deliberate demo simplification — documented as a limitation, not production auth. The key is fail-fast: when `ENV != "dev"` and no real `API_KEY` is set, the process refuses to start instead of running with a placeholder. Key comparison uses `hmac.compare_digest` (constant time). The frontend never hard-codes a key: it reads `VITE_API_KEY` and sends an empty key otherwise.
+- **Identification/Auth Failures (A07):** single shared API key is a deliberate demo simplification — documented as a limitation, not production auth. The key is fail-fast: when `ENV != "dev"` and no real `API_KEY` is set, the process refuses to start instead of running with a placeholder. Key comparison uses `hmac.compare_digest` (constant time). The frontend never sees a key: the browser calls same-origin `/api` and nginx injects `X-API-Key` server-side.
 - **Software/Data Integrity (A08):** no deserialization of untrusted data; model files are loaded only from the local `models/` directory.
 - **Logging/Monitoring (A09):** ingest counts and metrics are exposed via `/metrics`; failures return structured 4xx errors (401/404/422/429) instead of stack traces.
 - **SSRF (A10):** the only outbound call is the optional LLM request to `api.openai.com`, behind the `LLM_ENABLED` flag with a 5-second timeout and a template fallback.
 
 ## How to demo (5 steps)
 
-See `DEMO.md` for the full script. In short: (1) show the seeded CSV and its two duplicate storms + three attack chains, (2) load it and watch 152 alerts collapse to 7 incidents in the Dashboard, (3) open the top incident and read its evidence package aloud, (4) mark one incident false positive and show the metrics move, (5) run `python benchmark.py` live and read the numbers — including the 5-seed baseline table, where mean pooling fails the recall target in 3 of 5 seeds.
+See `DEMO.md` for the full script. In short: (1) show the seeded CSV and its two duplicate storms + three attack chains, (2) load it and watch 152 alerts collapse to 8 incidents in the Dashboard, (3) open the top incident and read its evidence package aloud, (4) mark one incident false positive and show the metrics move, (5) run `python benchmark.py` live and read the numbers — including the 5-seed baseline table, where AlertLens fails the recall target in seeds 2 and 3 and mean pooling fails in seeds 0 and 3, and the UNSW-NB15 Part C (0.9486, target not met).
 
 ## AWS deploy note (docs only, not deployed)
 

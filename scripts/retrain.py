@@ -1,6 +1,7 @@
 """Retrain using analyst feedback: feedback-labelled incidents add weighted
 synthetic samples in the current feature order (dur, sbytes, dbytes, rate,
-sttl, ct_srv_src, severity_num), then train.py's calibration runs again.
+sttl, ct_srv_src — flow columns only, no severity), then train.py's
+calibration runs again.
 Usage: python scripts/retrain.py
 """
 import os
@@ -36,12 +37,12 @@ def main() -> dict:
     for _ in range(tp * 20):
         extra_X.append([rng.uniform(0.1, 30.0), rng.uniform(500, 80000), rng.uniform(200, 60000),
                         rng.uniform(5, 800), float(np.clip(rng.normal(62, 12), 0, 255)),
-                        float(rng.integers(1, 25)), rng.uniform(0.5, 1.0)])
+                        float(rng.integers(1, 25))])
         extra_y.append(1)
     for _ in range(fp * 20):
         extra_X.append([rng.uniform(0.0, 5.0), rng.uniform(40, 8000), rng.uniform(40, 5000),
                         rng.uniform(0.1, 120), float(np.clip(rng.normal(254, 4), 0, 255)),
-                        float(rng.integers(1, 4)), rng.uniform(0.25, 0.75)])
+                        float(rng.integers(1, 4))])
         extra_y.append(0)
     if extra_X:
         X = np.vstack([X, np.array(extra_X)])

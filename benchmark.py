@@ -25,6 +25,18 @@ target and evaluated on the same test incidents:
 All Part B numbers are labelled "synthetic scenario set". If any method
 fails the recall target on test, that is reported, not hidden.
 
+Part C — UNSW-NB15-derived flow-level evaluation (only when
+``data/unsw-nb15.csv`` exists): the single file is split 60/20/20
+stratified by label with fixed seed 42; a GradientBoosting Pipeline is
+trained on train, the threshold is calibrated on val (target 0.95) and
+reported on TEST flows only (recall with 95% Wilson interval, precision,
+and the fraction of test flows suppressed at the threshold as "reduction").
+Part C is flow-level, not incident-level, and is reported separately from
+the synthetic Parts A/B — never merged into them. The alert stream built by
+``scripts/make_alerts_from_unsw.py`` is also produced (row count reported).
+Citation: Moustafa and Slay (2015), "UNSW-NB15: a comprehensive data set
+for network intrusion detection systems", MilCIS 2015.
+
 Usage: python benchmark.py
 """
 import json
@@ -83,19 +95,22 @@ def part_a() -> dict:
     Base.metadata.create_all(bind=engine)
     alerts = _load_csv_alerts("data/sample_alerts.csv")
     db = SessionLocal()
-    start = time.perf_counter()
-    result = ingest_alerts(db, alerts)
-    elapsed = time.perf_counter() - start
-    metrics = compute_metrics(db)
-    _, threshold = load_model()
-    incidents = db.query(Incident).all()
-    labelled = [i for i in incidents if i.is_malicious is not None]
-    malicious = [i for i in labelled if i.is_malicious]
-    surfaced_mal = [i for i in malicious if not i.suppressed]
-    surfaced = [i for i in incidents if not i.suppressed]
-    recall = len(surfaced_mal) / len(malicious) if malicious else 0.0
-    precision = len(surfaced_mal) / len(surfaced) if surfaced else 0.0
-    db.close()
+    try:
+        start = time.perf_counter()
+        result = ingest_alerts(db, alerts)
+        elapsed = time.perf_counter() - start
+        metrics = compute_metrics(db)
+        _, threshold = load_model()
+        incidents = db.query(Incident).all()
+        labelled = [i for i in incidents if i.is_malicious is not None]
+        malicious = [i for i in labelled if i.is_malicious]
+        surfaced_mal = [i for i in malicious if not i.suppressed]
+        surfaced = [i for i in incidents if not i.suppressed]
+        recall = len(surfaced_mal) / len(malicious) if malicious else 0.0
+        precision = len(surfaced_mal) / len(surfaced) if surfaced else 0.0
+    finally:
+        # Always release the session, even if ingest or scoring fails.
+        db.close()
     out = {
         "raw_alerts": len(alerts),
         "incidents": len(incidents),
@@ -274,13 +289,82 @@ def part_b() -> dict:
             "pooled_malicious": pooled_mal, "wilson_95": [lo, hi]}
 
 
+UNSW_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "data", "unsw-nb15.csv")
+
+
+def part_c() -> dict | None:
+    """UNSW-NB15-derived flow-level evaluation on TEST flows only.
+
+    Returns None (and prints NOT RUN) when data/unsw-nb15.csv is absent.
+    Stratified 60/20/20 train/val/test split, fixed seed 42; threshold
+    calibrated on val, reported on test only. Reduction here is the
+    fraction of TEST flows suppressed (below threshold) — a flow-level
+    figure, labelled as such, not an incident-level reduction.
+    """
+    from scripts.train import calibrate_threshold, load_unsw
+
+    if not os.path.exists(UNSW_PATH):
+        print("\nPart C — UNSW-NB15-derived evaluation: NOT RUN "
+              "(data/unsw-nb15.csv not found; no data downloaded).")
+        return None
+    X, y = load_unsw()
+    X_train, X_rest, y_train, y_rest = train_test_split(
+        X, y, test_size=0.4, random_state=42, stratify=y)
+    X_val, X_test, y_val, y_test = train_test_split(
+        X_rest, y_rest, test_size=0.5, random_state=42, stratify=y_rest)
+    model = train_model(X_train, y_train)
+    threshold, val_recall, val_met = calibrate_threshold(model, X_val, y_val, TARGET)
+    probs = model.predict_proba(X_test)[:, 1]
+    surfaced = probs >= threshold
+    tp = int(((surfaced) & (y_test == 1)).sum())
+    fp = int(((surfaced) & (y_test == 0)).sum())
+    n_mal = int((y_test == 1).sum())
+    recall = tp / n_mal if n_mal else 0.0
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    reduction = float(100.0 * (1 - surfaced.mean()))
+    lo, hi = _wilson_interval(tp, n_mal)
+    from scripts.make_alerts_from_unsw import main as _make_alerts
+    _make_alerts(seed=42)
+    print("\nPart C — UNSW-NB15-derived evaluation (TEST flows only, seed 42)")
+    print(f"  rows: {len(y)} (train={len(y_train)} val={len(y_val)} test={len(y_test)})")
+    print(f"  threshold={threshold:.4f} val_recall={val_recall:.4f} val_target_met={val_met}")
+    print(f"  test_recall={recall:.4f} (95% Wilson interval [{lo}, {hi}]) "
+          f"test_precision={precision:.4f} test_reduction={reduction:.2f}%")
+    print(f"  test_target_met={bool(recall >= TARGET)} "
+          f"(pooled TP {tp}/{n_mal} malicious test flows)")
+    if recall < TARGET:
+        print("  NOTE: Part C FAILED the 0.95 recall target on test — reported, not hidden.")
+    return {"n_rows": int(len(y)), "n_train": int(len(y_train)),
+            "n_val": int(len(y_val)), "n_test": int(len(y_test)),
+            "threshold": round(float(threshold), 4),
+            "val_recall": round(float(val_recall), 4),
+            "val_target_met": bool(val_met),
+            "test_recall": round(float(recall), 4),
+            "test_precision": round(float(precision), 4),
+            "test_reduction": round(reduction, 2),
+            "test_target_met": bool(recall >= TARGET),
+            "tp": tp, "n_malicious_test": n_mal, "wilson_95": [lo, hi]}
+
+
 def main() -> dict:
     print("AlertLens benchmark — all numbers measured in this run")
-    a = part_a()
-    b = part_b()
-    print("\nData-source labels: Part A uses the seeded demo set (synthetic); "
-          "Part B uses the synthetic scenario set. No UNSW-NB15 data was used.")
-    return {"part_a": a, "part_b": b}
+    try:
+        a = part_a()
+        b = part_b()
+        c = part_c()
+    finally:
+        # Always dispose the engine pool, even if a part fails mid-run,
+        # so no SQLite connection is left open after the benchmark exits.
+        engine.dispose()
+    if c is None:
+        print("\nData-source labels: Part A uses the seeded demo set (synthetic); "
+              "Part B uses the synthetic scenario set. No UNSW-NB15 data was used.")
+    else:
+        print("\nData-source labels: Part A uses the seeded demo set (synthetic); "
+              "Part B uses the synthetic scenario set; Part C is UNSW-NB15-derived "
+              "(flow-level, test only) and is reported separately.")
+    return {"part_a": a, "part_b": b, "part_c": c}
 
 
 if __name__ == "__main__":

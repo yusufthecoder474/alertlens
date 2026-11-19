@@ -1,3 +1,8 @@
+# AlertLens stack: Postgres 17 + FastAPI + nginx-served React app.
+#
+# Required: copy .env.example to .env and set a real API_KEY first.
+# API_KEY is required with no fallback: ${API_KEY:?Set API_KEY in .env}
+# fails fast with that message if it is missing. See .env.example.
 services:
   db:
     image: postgres:17
@@ -5,8 +10,10 @@ services:
       POSTGRES_USER: alertlens
       POSTGRES_PASSWORD: alertlens
       POSTGRES_DB: alertlens
-    ports:
-      - "5432:5432"
+    # Port 5432 is NOT published by default; uncomment to inspect the DB
+    # from the host (localhost only).
+    # ports:
+    #   - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,7 +26,9 @@ services:
       context: .
       dockerfile: backend.Dockerfile
     environment:
-      API_KEY: ${API_KEY:-dev-api-key-change-me}
+      ENV: "prod"
+      API_KEY: ${API_KEY:?Set API_KEY in .env}
+      SEED_DEMO: ${SEED_DEMO:-false}
       DATABASE_URL: postgresql+psycopg2://alertlens:alertlens@db:5432/alertlens
       DEDUP_WINDOW_SECONDS: 300
       CORRELATION_WINDOW_SECONDS: 3600
@@ -30,13 +39,24 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
   web:
     build:
       context: .
       dockerfile: frontend.Dockerfile
+    environment:
+      # Consumed by the nginx template (envsubst) — injected server-side as
+      # X-API-Key on proxied /api/ requests; never sent to the browser.
+      API_KEY: ${API_KEY:?Set API_KEY in .env}
     ports:
       - "5173:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 volumes:
   pgdata:

@@ -1,7 +1,7 @@
 {
-  "threshold": 0.4990582755737364,
+  "threshold": 0.6277869430194927,
   "recall_target": 0.95,
-  "validation_recall": 0.955,
+  "validation_recall": 0.9501026435962965,
   "target_met": true,
   "features": [
     "dur",
@@ -9,8 +9,7 @@
     "dbytes",
     "rate",
     "sttl",
-    "ct_srv_src",
-    "severity_num"
+    "ct_srv_src"
   ],
-  "source": "synthetic (UNSW-NB15-style)"
+  "source": "unsw-nb15.csv"
 }

@@ -6,8 +6,11 @@ as a feature. Every alert also carries a ``raw`` column: a JSON object of
 UNSW-NB15-style flow features (dur, sbytes, dbytes, rate, sttl, ct_srv_src)
 drawn from the same distributions as ``api.scoring.generate_synthetic_flows``
 — malicious-like flows for malicious alerts, benign-like for benign — with
-the classes deliberately overlapping. ``severity_num`` is derived from the
-alert severity at scoring time and is never stored in ``raw``.
+realistic overlap: ~15% of malicious alerts carry benign-like flows
+("stealthy attacks"), ~10% of benign alerts carry malicious-like flows
+("scanners/backups"), and sttl/rate ranges overlap. Severity is not a
+model feature and is never stored in ``raw``; it enters only through the
+priority formula at scoring time.
 
 Also writes data/synthetic_flows.csv (UNSW-NB15-style flows, header =
 ``api.scoring.FEATURE_NAMES`` + ``label``) and data/scenarios.csv (see
@@ -39,30 +42,46 @@ BENIGN = [("Failed Login Burst", "medium"), ("Suspicious Registry Change", "low"
 BASE = datetime(2026, 11, 19, 9, 0, 0)
 
 
-def flow_dict(rng: random.Random, malicious: bool) -> dict:
+def _flow_values(rng: random.Random, malicious: bool) -> dict:
     """One UNSW-NB15-style flow dict, same ranges as generate_synthetic_flows.
 
-    Malicious: dur 0.1-30, sbytes 500-80000, dbytes 200-60000, rate 5-800,
-    sttl ~N(62,12), ct_srv_src 1-25. Benign: dur 0-5, sbytes 40-8000,
-    dbytes 40-5000, rate 0.1-120, sttl ~N(254,4), ct_srv_src 1-4.
+    Malicious: dur 0.05-30, sbytes 100-80000, dbytes 100-60000, rate 1-800,
+    sttl ~N(90,45), ct_srv_src 1-25. Benign: dur 0-15, sbytes 40-30000,
+    dbytes 40-20000, rate 0.1-400, sttl ~N(200,60), ct_srv_src 1-12.
+    sttl and rate overlap between the classes; neither separates them.
     """
     if malicious:
         return {
-            "dur": round(rng.uniform(0.1, 30.0), 3),
-            "sbytes": int(rng.uniform(500, 80000)),
-            "dbytes": int(rng.uniform(200, 60000)),
-            "rate": round(rng.uniform(5, 800), 3),
-            "sttl": int(max(0, min(255, rng.gauss(62, 12)))),
+            "dur": round(rng.uniform(0.05, 30.0), 3),
+            "sbytes": int(rng.uniform(100, 80000)),
+            "dbytes": int(rng.uniform(100, 60000)),
+            "rate": round(rng.uniform(1, 800), 3),
+            "sttl": int(max(0, min(255, rng.gauss(90, 45)))),
             "ct_srv_src": rng.randint(1, 25),
         }
     return {
-        "dur": round(rng.uniform(0.0, 5.0), 3),
-        "sbytes": int(rng.uniform(40, 8000)),
-        "dbytes": int(rng.uniform(40, 5000)),
-        "rate": round(rng.uniform(0.1, 120), 3),
-        "sttl": int(max(0, min(255, rng.gauss(254, 4)))),
-        "ct_srv_src": rng.randint(1, 4),
+        "dur": round(rng.uniform(0.0, 15.0), 3),
+        "sbytes": int(rng.uniform(40, 30000)),
+        "dbytes": int(rng.uniform(40, 20000)),
+        "rate": round(rng.uniform(0.1, 400), 3),
+        "sttl": int(max(0, min(255, rng.gauss(200, 60)))),
+        "ct_srv_src": rng.randint(1, 12),
     }
+
+
+def flow_dict(rng: random.Random, malicious: bool) -> dict:
+    """One flow dict for an alert, with realistic class overlap.
+
+    ~15% of malicious alerts carry benign-like flows ("stealthy attacks")
+    and ~10% of benign alerts carry malicious-like flows ("scanners /
+    backups"), mirroring generate_synthetic_flows. Severity is not swapped:
+    it is the alert's own severity, not a flow column.
+    """
+    if malicious and rng.random() < 0.15:
+        return _flow_values(rng, False)
+    if not malicious and rng.random() < 0.10:
+        return _flow_values(rng, True)
+    return _flow_values(rng, malicious)
 
 
 def _alert_dict(aid, ts, rule, sev, src, dst, host, malicious, raw):

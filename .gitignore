@@ -12,3 +12,5 @@ htmlcov/
 models/model.pkl
 alertlens-*.zip
 data/unsw-nb15.csv
+data/unsw_alerts.csv
+data/unsw-nb15.zip

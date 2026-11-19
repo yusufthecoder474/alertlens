@@ -17,9 +17,10 @@ vi.mock("../api.js", () => ({
 describe("Queue", () => {
   it("lists incidents sorted by priority by default", async () => {
     render(<Queue />);
-    const items = await waitFor(() => screen.getAllByRole("listitem"));
-    expect(items[0]).toHaveTextContent("PowerShell on web-01");
-    expect(items[1]).toHaveTextContent("Registry on workstation-02");
+    const rows = await waitFor(() => screen.getAllByRole("row"));
+    // First row is the table header; the next two are incidents.
+    expect(rows[1]).toHaveTextContent("PowerShell on web-01");
+    expect(rows[2]).toHaveTextContent("Registry on workstation-02");
   });
 
   it("offers status filter and sort controls", async () => {
@@ -38,6 +39,6 @@ describe("Queue", () => {
     await waitFor(() => expect(screen.getByText(/Registry noise on workstation-03/)).toBeInTheDocument());
     expect(getIncidents).toHaveBeenCalledWith("", true);
     // Shown suppressed rows carry a "suppressed" badge.
-    expect(screen.getByText(/Registry noise on workstation-03/).closest("li")).toHaveTextContent("suppressed");
+    expect(screen.getByText(/Registry noise on workstation-03/).closest("tr")).toHaveTextContent("suppressed");
   });
 });

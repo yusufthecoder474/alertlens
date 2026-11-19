@@ -72,7 +72,9 @@ class IncidentOut(BaseModel):
     src_ip: Optional[str] = None
     status: str
     priority_score: float
-    ml_probability: float
+    # None when no alert in the incident has flow evidence (the model did
+    # not score it); such incidents are never suppressed.
+    ml_probability: Optional[float] = None
     severity: str
     mitre_tags: list[str] = []
     factors: list[str] = []

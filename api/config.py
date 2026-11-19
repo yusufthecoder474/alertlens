@@ -7,7 +7,8 @@ fast at import time rather than starting with a guessable default key.
 """
 import os
 
-_PLACEHOLDER_KEYS = {"", "change-me", "dev-api-key-change-me", "your-api-key-here"}
+_PLACEHOLDER_KEYS = {"", "change-me", "dev-api-key-change-me", "your-api-key-here",
+                     "change-me-in-production"}
 
 
 def _int(name: str, default: int) -> int:

@@ -1,0 +1,29 @@
+# nginx config template for the AlertLens web container.
+#
+# $API_KEY is substituted by envsubst at container start (see
+# frontend/docker-entrypoint.sh, which substitutes ONLY $API_KEY, so
+# nginx's own $host / $uri / $remote_addr variables pass through
+# untouched). The key is injected here, server-side, as an X-API-Key
+# header on every proxied request — it never reaches the browser bundle.
+# API_KEY must be set in the container environment (docker-compose.yml
+# requires it: ${API_KEY:?Set API_KEY in .env}). Use letters/digits only;
+# a key containing a double quote would break this config file.
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        # Trailing slash strips the /api/ prefix: /api/metrics -> /metrics.
+        proxy_pass http://api:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-API-Key "${API_KEY}";
+    }
+}

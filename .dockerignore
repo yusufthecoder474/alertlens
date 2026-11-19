@@ -1,0 +1,17 @@
+# Keep build contexts small and secrets out of images.
+node_modules
+frontend/node_modules
+frontend/dist
+.venv
+__pycache__
+.git
+.coverage
+.pytest_cache
+.ruff_cache
+*.db
+.env
+# Dataset files must never enter an image: Docker/CI builds train on the
+# synthetic generator, so they stay deterministic and small.
+data/unsw-nb15.csv
+data/unsw_alerts.csv
+data/unsw-nb15.zip

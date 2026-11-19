@@ -15,9 +15,13 @@ TEMPLATE = (
 )
 
 
-def next_action(priority: float, ml_probability: float) -> str:
-    """Plain next step an analyst can act on."""
-    if priority >= 0.7 or ml_probability >= 0.7:
+def next_action(priority: float, ml_probability: float | None) -> str:
+    """Plain next step an analyst can act on.
+
+    ``ml_probability`` may be None (no flow evidence); the ML branch
+    then simply does not fire and the decision rests on priority alone.
+    """
+    if priority >= 0.7 or (ml_probability is not None and ml_probability >= 0.7):
         return "isolate the host and start containment"
     if priority >= 0.4:
         return "triage the alert timeline and check the host"
@@ -37,7 +41,8 @@ def template_summary(incident: dict, alerts: list[dict]) -> str:
         rule=top_rule,
         mitre=mitre,
         priority=float(incident.get("priority_score", 0.0)),
-        action=next_action(float(incident.get("priority_score", 0.0)), float(incident.get("ml_probability", 0.0))),
+        action=next_action(float(incident.get("priority_score", 0.0)),
+                           incident.get("ml_probability")),
     )
 
 

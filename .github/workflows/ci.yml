@@ -37,3 +37,18 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+  docker:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    env:
+      # CI-only test key (clearly fake; never a real secret). Compose
+      # requires API_KEY with no fallback, so the workflow sets it here
+      # and writes it to .env for `docker compose`.
+      API_KEY: ci-test-key
+    steps:
+      - uses: actions/checkout@v4
+      - run: printf 'API_KEY=%s\nSEED_DEMO=false\n' "$API_KEY" > .env
+      - run: docker compose up -d --build --wait
+      - run: python scripts/docker_smoke.py
+      - run: docker compose down -v
+        if: always()
