@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: alertlens
+      POSTGRES_PASSWORD: alertlens
+      POSTGRES_DB: alertlens
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alertlens"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  api:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    environment:
+      API_KEY: ${API_KEY:-dev-api-key-change-me}
+      DATABASE_URL: postgresql+psycopg2://alertlens:alertlens@db:5432/alertlens
+      DEDUP_WINDOW_SECONDS: 300
+      CORRELATION_WINDOW_SECONDS: 3600
+      RECALL_TARGET: 0.95
+      LLM_ENABLED: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+  web:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+volumes:
+  pgdata:

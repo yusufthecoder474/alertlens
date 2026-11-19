@@ -1,0 +1,19 @@
+"""SQLAlchemy engine/session setup. SQLite locally, PostgreSQL in Docker/CI."""
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+from api.config import settings
+
+_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+engine = create_engine(settings.database_url, connect_args=_connect_args)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base = declarative_base()
+
+
+def get_db():
+    """FastAPI dependency yielding a database session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

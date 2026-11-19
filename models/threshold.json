@@ -1,0 +1,16 @@
+{
+  "threshold": 0.4990582755737364,
+  "recall_target": 0.95,
+  "validation_recall": 0.955,
+  "target_met": true,
+  "features": [
+    "dur",
+    "sbytes",
+    "dbytes",
+    "rate",
+    "sttl",
+    "ct_srv_src",
+    "severity_num"
+  ],
+  "source": "synthetic (UNSW-NB15-style)"
+}
